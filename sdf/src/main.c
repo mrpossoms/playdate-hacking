@@ -15,21 +15,11 @@ typedef float vec4_t __attribute__ ((vector_size (16)));
 
 
 static int update(void* userdata);
-const char* fontpath = "/System/Fonts/Asheville-Sans-14-Bold.pft";
-LCDFont* font = NULL;
 
 #ifdef _WINDLL
 __declspec(dllexport)
 #endif
 
-
-#define TEXT_WIDTH 86
-#define TEXT_HEIGHT 16
-
-int x = (400-TEXT_WIDTH)/2;
-int y = (240-TEXT_HEIGHT)/2;
-int dx = 1;
-int dy = 2;
 
 uint8_t rb[LCD_ROWS][LCD_COLUMNS];
 vec4_t rays[LCD_ROWS * LCD_COLUMNS];
@@ -38,8 +28,14 @@ typedef struct {
 	float focal_length;
 	struct {
 		int rows, cols;
+		float pixel_size;
 	} sensor;
 } pinhole_t;
+
+static inline float magnitude(const vec4_t v)
+{
+	return sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+}
 
 void pinhole_rays(const pinhole_t* pinhole, vec4_t* rays)
 {
@@ -51,10 +47,10 @@ void pinhole_rays(const pinhole_t* pinhole, vec4_t* rays)
 	{
 		for (int c = 0; c < pinhole->sensor.cols; c++)
 		{
-			float x = (c - sensor_width / 2) / sensor_width;
-			float y = (r - sensor_height / 2) / sensor_height;
-			vec4_t ray = { x, y, -pinhole->focal_length, 0 };
-			rays[r * pinhole->sensor.cols + c] = ray;
+			float x = (c - sensor_width / 2) * pinhole->sensor.pixel_size;
+			float y = (r - sensor_height / 2) * pinhole->sensor.pixel_size;
+			vec4_t ray = { x, y, pinhole->focal_length, 0 };
+			rays[r * pinhole->sensor.cols + c] = ray / magnitude(ray);
 		}
 	}
 }
@@ -65,11 +61,6 @@ int eventHandler(PlaydateAPI* pd, PDSystemEvent event, uint32_t arg)
 
 	if ( event == kEventInit )
 	{
-		const char* err;
-		font = pd->graphics->loadFont(fontpath, &err);
-		
-		if ( font == NULL )
-			pd->system->error("%s:%i Couldn't load font %s: %s", __FILE__, __LINE__, fontpath, err);
 
 		// Note: If you set an update callback in the kEventInit handler, the system assumes the game is pure C and doesn't run any Lua code in the game
 		pd->system->setUpdateCallback(update, pd);
@@ -79,31 +70,29 @@ int eventHandler(PlaydateAPI* pd, PDSystemEvent event, uint32_t arg)
 			memset(rb[r], r, LCD_COLUMNS);
 		}
 
-		pinhole_rays(&(pinhole_t){ 1.0, { LCD_ROWS, LCD_COLUMNS } }, rays);
+		pinhole_rays(&(pinhole_t){ 
+			.focal_length=1.0, 
+			.sensor = { LCD_ROWS, LCD_COLUMNS, 0.01f } 
+		}, rays);
 	}
 	
 	return 0;
 }
 
-void circle(PlaydateAPI* pd, int t)
+float sphere(const vec4_t* p, const vec4_t* origin, float radius)
 {
-	int cy = LCD_ROWS >> 1;
-	int cx = LCD_COLUMNS >> 1;
-	int rad2 = sin(t / 100.0) * 1000 + 1000;
-	uint8_t* frame = pd->graphics->getFrame();
+	return magnitude(*origin - *p) - radius;
+}
 
-	for (int r = 0; r < LCD_ROWS; r++)
-	{
-		uint8_t* row = frame + (r * 52);
-		int dr2 = (r - cy) * (r - cy);
-		for (int c = 0; c < LCD_COLUMNS; c++)
-		{
-			int dc2 = (c - cx) * (c - cx);
-			int in_circle = (dr2 + dc2) < rad2;
-			int bi = c >> 3;
-			row[bi] |= (in_circle << ((7-c) & 7));
-		}
-	}
+static vec4_t numerical_normal(const float d0, const vec4_t p, const float e=0.0001)
+{
+	auto dx_dd = sphere(p + vec3{e,0,0}) - d0;
+	auto dy_dd = sphere(p + vec3{0,e,0}) - d0;
+	auto dz_dd = sphere(p + vec3{0,0,e}) - d0;
+
+	// assert(dx_dd != 0 || dy_dd != 0 || dz_dd != 0);
+
+	return vec3{dx_dd, dy_dd, dz_dd}.unit();
 }
 
 static int update(void* userdata)
@@ -111,21 +100,28 @@ static int update(void* userdata)
 	PlaydateAPI* pd = userdata;
 	static int count = 0;
 	pd->graphics->clear(kColorBlack);
-	// pd->graphics->setFont(font);
-	// pd->graphics->drawText("Hello World!", strlen("Hello World!"), kASCIIEncoding, x, y);
 
-	
+	vec4_t origins[LCD_ROWS * LCD_COLUMNS] = {};
+	vec4_t sphere_center = { 0, 0, 5, 0 };
 
-	// x += dx;
-	// y += dy;
-	
-	// if ( x < 0 || x > LCD_COLUMNS - TEXT_WIDTH )
-	// 	dx = -dx;
-	
-	// if ( y < 0 || y > LCD_ROWS - TEXT_HEIGHT )
-	// 	dy = -dy;
+	memset(rb, 0, sizeof(rb));
 
-	// memset(frame, count++ % 2, 52 * LCD_ROWS);
+	for (int i = 0; i < LCD_ROWS * LCD_COLUMNS; i++)
+	{
+		for (int step = 0; step < 10; step++)
+		{
+			float dist = sphere(&origins[i], &sphere_center, 1);
+
+			if (dist < 0.01f)
+			{
+				rb[i / LCD_COLUMNS][i % LCD_COLUMNS] = 255;
+				break;
+			}
+
+			origins[i] += rays[i] * dist;
+		}
+	}
+
 	uint8_t* frame = pd->graphics->getFrame();
 	for (int r = 0; r < LCD_ROWS; r++)
 	{
