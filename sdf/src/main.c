@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 #include "pd_api.h"
 
@@ -199,6 +200,8 @@ int eventHandler(PlaydateAPI* pd, PDSystemEvent event, uint32_t arg)
 		// Note: If you set an update callback in the kEventInit handler, the system assumes the game is pure C and doesn't run any Lua code in the game
 		pd->system->setUpdateCallback(update, pd);
 	
+		pd->display->setRefreshRate(50);
+
 		for (int r = 0; r < (LCD_ROWS); r++)
 		{
 			memset(rb[r], r, LCD_COLUMNS);
@@ -213,19 +216,40 @@ int eventHandler(PlaydateAPI* pd, PDSystemEvent event, uint32_t arg)
 	return 0;
 }
 
+static inline float ground(const vec4_t p)
+{
+	return 2 - p[1];
+}
+
 static inline float sphere(const vec4_t p, const vec4_t origin, float radius)
 {
 	vec4_t delta = origin - p;
 	return magnitude(delta) - radius;
 }
 
-static inline float octahedron(vec4_t p, const vec4_t origin, float s)
+static inline float octahedron(vec4_t p, const vec4_t origin, float s, float y_rad)
 {
-	p = abs4(p - origin);
+	// \ a  b \ |x| ~ | a * x + b * y |
+	// | c  d | |y| ~ | c * x + d * y |
+
+	float cy = cosf(y_rad);
+	float sy = sinf(y_rad);
+
+	float a = cy;
+	float b = sy;
+	float c = -sy;
+	float d = cy;
+
+
+
+	vec4_t dp = p - origin;
+	p[0] = a * dp[0] + b * dp[2];
+	p[2] = c * dp[0] + d * dp[2];
+	p = abs4(p);
 	return (p[0] + p[1] + p[2] - s) * 0.57735027f;
 }
 
-vec4_t sphere_center = { 0, 0, 5, 0 };
+vec4_t shape_center = { 0, 0, 5, 0 };
 mat4_t world = {
 	{ 1, 0, 0, 0 },
 	{ 0, 1, 0, 0 },
@@ -234,12 +258,15 @@ mat4_t world = {
 };
 mat4_t world_inv;
 
+
+float t = 0;
+
 float scene(const vec4_t p)
 {
 	// vec4_t p_p = mat4_mul_vec4(world_inv, p);
 
-	// return sphere(p, sphere_center, 1);
-	return octahedron(p, sphere_center, 4);
+	// return sphere(p, shape_center, 1);
+	return fminf(ground(p), octahedron(p, shape_center, 1, t));
 }
 
 static vec4_t numerical_normal(const float d0, const vec4_t p, const float e)
@@ -265,8 +292,10 @@ static int update(void* userdata)
 
 	vec4_t origins[LCD_ROWS * LCD_COLUMNS] = {};
 
-	float t = count / 50.0;
-	vec4_t light_dir = { cos(t), sin(t), 0, 0 };
+	t = count / 50.0;
+	vec4_t light_dir = { cos(-M_PI/4), sin(-M_PI/4), 0, 0 };
+	shape_center[0] = 5 * sin(0);
+	shape_center[2] = 5 * cos(0);
 
 	// memset(rb, 0, sizeof(rb));
 
@@ -277,7 +306,7 @@ static int update(void* userdata)
 	for (int r = 0; r < LCD_ROWS; r++)
 	{
 		for (int c = 0; c < LCD_COLUMNS; c++)
-		for (int step = 0; step < 10; step++)
+		for (int step = 0; step < 20; step++)
 		{
 			int i = r * LCD_COLUMNS + c;
 			float dist = scene(origins[i]);
@@ -290,6 +319,10 @@ static int update(void* userdata)
 				rb[r][c] = (uint8_t)(((ndl >= 0) * ndl) * 255);
 
 				break;
+			}
+			else
+			{
+				rb[r][c] = 0;
 			}
 
 			origins[i] += rays[i] * dist;
