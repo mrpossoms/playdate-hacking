@@ -8,13 +8,13 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <math.h>
 
 #include "pd_api.h"
 
 typedef float vec4_t __attribute__ ((vector_size (16)));
 // typedef float mat4_t __attribute__ ((vector_size (64)));
-typedef vec4_t mat4_t[4];
 
 static int update(void* userdata);
 
@@ -39,122 +39,20 @@ static inline float magnitude(const vec4_t v)
 	return sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
 }
 
-static inline vec4_t unit4(const vec4_t v)
+static inline vec4_t unit4f(const vec4_t v)
 {
 	return v / magnitude(v);
 }
 
-static inline float dot4(const vec4_t a, const vec4_t b)
+static inline float dot4f(const vec4_t a, const vec4_t b)
 {
 	vec4_t c = a * b;
 	return c[0] + c[1] + c[2] + c[3];
 }
 
-static inline vec4_t abs4(const vec4_t v)
+static inline vec4_t abs4f(const vec4_t v)
 {
 	return (vec4_t){ fabs(v[0]), fabs(v[1]), fabs(v[2]), fabs(v[3]) };
-}
-
-static void mat4_T(mat4_t r, const mat4_t m)
-{
-	for (int i = 0; i < 4; i++)
-	{
-		r[i] = (vec4_t){ m[0][i], m[1][i], m[2][i], m[3][i] };
-	}
-}
-
-static void mat4_mul(mat4_t r, const mat4_t a, const mat4_t b)
-{
-	mat4_t bt;
-	mat4_T(bt, b);
-	for (int i = 0; i < 4; i++)
-	{
-		for (int j = 0; j < 4; j++)
-		{
-			r[i][j] = dot4(a[i], bt[j]);
-		}
-	}
-}
-
-static vec4_t mat4_mul_vec4(const mat4_t m, const vec4_t v)
-{
-	vec4_t result = { 0 };
-	for (int i = 0; i < 4; i++)
-	{
-		result[i] = dot4(m[i], v);
-	}
-	return result;
-}
-
-
-static void mat4_translate(mat4_t r, const vec4_t v)
-{
-	r[0] = (vec4_t){ 1, 0, 0, v[0] };
-	r[1] = (vec4_t){ 0, 1, 0, v[1] };
-	r[2] = (vec4_t){ 0, 0, 1, v[2] };
-	r[3] = (vec4_t){ 0, 0, 0, 1 };
-}
-
-static void mat4_rot_y(mat4_t r, float theta)
-{
-	float c = cosf(theta);
-	float s = sinf(theta);
-	r[0] = (vec4_t){ c, 0, s, 0 };
-	r[1] = (vec4_t){ 0, 1, 0, 0 };
-	r[2] = (vec4_t){-s, 0, c, 0 };
-	r[3] = (vec4_t){ 0, 0, 0, 1 };
-}
-
-
-static void mat4_inv(mat4_t r, const mat4_t M)
-{
-	float s[6];
-	float c[6];
-	s[0] = M[0][0]*M[1][1] - M[1][0]*M[0][1];
-	s[1] = M[0][0]*M[1][2] - M[1][0]*M[0][2];
-	s[2] = M[0][0]*M[1][3] - M[1][0]*M[0][3];
-	s[3] = M[0][1]*M[1][2] - M[1][1]*M[0][2];
-	s[4] = M[0][1]*M[1][3] - M[1][1]*M[0][3];
-	s[5] = M[0][2]*M[1][3] - M[1][2]*M[0][3];
-
-	c[0] = M[2][0]*M[3][1] - M[3][0]*M[2][1];
-	c[1] = M[2][0]*M[3][2] - M[3][0]*M[2][2];
-	c[2] = M[2][0]*M[3][3] - M[3][0]*M[2][3];
-	c[3] = M[2][1]*M[3][2] - M[3][1]*M[2][2];
-	c[4] = M[2][1]*M[3][3] - M[3][1]*M[2][3];
-	c[5] = M[2][2]*M[3][3] - M[3][2]*M[2][3];
-
-	/* Assumes it is invertible */
-	float idet = 1.0f/( s[0]*c[5]-s[1]*c[4]+s[2]*c[3]+s[3]*c[2]-s[4]*c[1]+s[5]*c[0] );
-
-	r[0][0] = ( M[1][1] * c[5] - M[1][2] * c[4] + M[1][3] * c[3]) * idet;
-	r[0][1] = (-M[0][1] * c[5] + M[0][2] * c[4] - M[0][3] * c[3]) * idet;
-	r[0][2] = ( M[3][1] * s[5] - M[3][2] * s[4] + M[3][3] * s[3]) * idet;
-	r[0][3] = (-M[2][1] * s[5] + M[2][2] * s[4] - M[2][3] * s[3]) * idet;
-
-	r[1][0] = (-M[1][0] * c[5] + M[1][2] * c[2] - M[1][3] * c[1]) * idet;
-	r[1][1] = ( M[0][0] * c[5] - M[0][2] * c[2] + M[0][3] * c[1]) * idet;
-	r[1][2] = (-M[3][0] * s[5] + M[3][2] * s[2] - M[3][3] * s[1]) * idet;
-	r[1][3] = ( M[2][0] * s[5] - M[2][2] * s[2] + M[2][3] * s[1]) * idet;
-
-	r[2][0] = ( M[1][0] * c[4] - M[1][1] * c[2] + M[1][3] * c[0]) * idet;
-	r[2][1] = (-M[0][0] * c[4] + M[0][1] * c[2] - M[0][3] * c[0]) * idet;
-	r[2][2] = ( M[3][0] * s[4] - M[3][1] * s[2] + M[3][3] * s[0]) * idet;
-	r[2][3] = (-M[2][0] * s[4] + M[2][1] * s[2] - M[2][3] * s[0]) * idet;
-
-	r[3][0] = (-M[1][0] * c[3] + M[1][1] * c[1] - M[1][2] * c[0]) * idet;
-	r[3][1] = ( M[0][0] * c[3] - M[0][1] * c[1] + M[0][2] * c[0]) * idet;
-	r[3][2] = (-M[3][0] * s[3] + M[3][1] * s[1] - M[3][2] * s[0]) * idet;
-	r[3][3] = ( M[2][0] * s[3] - M[2][1] * s[1] + M[2][2] * s[0]) * idet;
-}
-
-static void mat4_I(mat4_t r)
-{
-	memset(r, 0, sizeof(mat4_t));
-	for (int i = 0; i < 4; i++)
-	{
-		r[i][i] = 1;
-	}
 }
 
 uint8_t fast_rand()
@@ -218,7 +116,7 @@ int eventHandler(PlaydateAPI* pd, PDSystemEvent event, uint32_t arg)
 
 static inline float ground(const vec4_t p)
 {
-	return 2 - p[1];
+	return 1.f - p[1];
 }
 
 static inline float sphere(const vec4_t p, const vec4_t origin, float radius)
@@ -232,32 +130,30 @@ static inline float octahedron(vec4_t p, const vec4_t origin, float s, float y_r
 	// \ a  b \ |x| ~ | a * x + b * y |
 	// | c  d | |y| ~ | c * x + d * y |
 
-	float cy = cosf(y_rad);
-	float sy = sinf(y_rad);
+	static float theta;
+	static float cy;
+	static float sy;
+
+	if (y_rad != theta)
+	{
+		theta = y_rad;
+		cy = cosf(y_rad);
+		sy = sinf(y_rad);
+	}
 
 	float a = cy;
 	float b = sy;
 	float c = -sy;
 	float d = cy;
 
-
-
 	vec4_t dp = p - origin;
 	p[0] = a * dp[0] + b * dp[2];
 	p[2] = c * dp[0] + d * dp[2];
-	p = abs4(p);
+	p = abs4f(p);
 	return (p[0] + p[1] + p[2] - s) * 0.57735027f;
 }
 
-vec4_t shape_center = { 0, 0, 5, 0 };
-mat4_t world = {
-	{ 1, 0, 0, 0 },
-	{ 0, 1, 0, 0 },
-	{ 0, 0, 1, 0 },
-	{ 0, 0, 0, 1 }
-};
-mat4_t world_inv;
-
+vec4_t shape_center = { 0, 0, 2.5, 0 };
 
 float t = 0;
 
@@ -266,7 +162,8 @@ float scene(const vec4_t p)
 	// vec4_t p_p = mat4_mul_vec4(world_inv, p);
 
 	// return sphere(p, shape_center, 1);
-	return fminf(ground(p), octahedron(p, shape_center, 1, t));
+	// return fminf(ground(p), octahedron(p, shape_center, 1, t));
+	return fminf(ground(p), sphere(p, shape_center, 1.f));
 }
 
 static vec4_t numerical_normal(const float d0, const vec4_t p, const float e)
@@ -281,7 +178,7 @@ static vec4_t numerical_normal(const float d0, const vec4_t p, const float e)
 
 	vec4_t normal = { dx_dd, dy_dd, dz_dd, 0 };
 
-	return unit4(normal);
+	return unit4f(normal);
 }
 
 static int update(void* userdata)
@@ -293,9 +190,8 @@ static int update(void* userdata)
 	vec4_t origins[LCD_ROWS * LCD_COLUMNS] = {};
 
 	t = count / 50.0;
-	vec4_t light_dir = { cos(-M_PI/4), sin(-M_PI/4), 0, 0 };
-	shape_center[0] = 5 * sin(0);
-	shape_center[2] = 5 * cos(0);
+	vec4_t light_dir = { cosf(pd->system->getCrankAngle()*(3.14159f/180.f)), -1.f, sinf(pd->system->getCrankAngle()*(3.14159f/180.f)), 0 };
+	light_dir = unit4f(light_dir);
 
 	// memset(rb, 0, sizeof(rb));
 
@@ -306,26 +202,42 @@ static int update(void* userdata)
 	for (int r = 0; r < LCD_ROWS; r++)
 	{
 		for (int c = 0; c < LCD_COLUMNS; c++)
-		for (int step = 0; step < 20; step++)
 		{
-			int i = r * LCD_COLUMNS + c;
-			float dist = scene(origins[i]);
-
-			if (dist < 0.01f)
+			float t = 0;
+			for (int step = 0; step < 30; step++)
 			{
-				vec4_t n = numerical_normal(dist, origins[i], 0.01f);
+				int i = r * LCD_COLUMNS + c;
+				vec4_t p_t = origins[i] + rays[i] * t;
+				float dist = scene(p_t);
 
-				float ndl = dot4(n,light_dir);
-				rb[r][c] = (uint8_t)(((ndl >= 0) * ndl) * 255);
+				if (dist <= 0.01f)
+				{
+					vec4_t n = numerical_normal(dist, p_t, 0.01f);
+					float ndl = dot4f(n,light_dir);
 
-				break;
+					t = 0.001f;
+					p_t += n * 0.01f;
+					for (int shadow_step = 0; shadow_step < 10; shadow_step++)
+					{
+						float shadow_dist = scene(p_t + light_dir * t);
+						if (shadow_dist < 0.001f)
+						{
+							ndl = 0.f;
+							break;
+						}
+						t += shadow_dist;
+					}
+					rb[r][c] = (uint8_t)(((ndl >= 0) * ndl) * 255);
+
+					break;
+				}
+				else
+				{
+					rb[r][c] = 0;
+				}
+
+				t += dist;
 			}
-			else
-			{
-				rb[r][c] = 0;
-			}
-
-			origins[i] += rays[i] * dist;
 		}
 	}
 
